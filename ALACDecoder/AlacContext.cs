@@ -36,7 +36,7 @@ namespace ALACdotNET.Decoder
         /// <summary>
         /// Points to the last sample read - can be used to determine position
         /// </summary>
-        internal int LastSampleNumber { get; private set; }
+        public int LastSampleNumber { get; private set; }
         #endregion
 
         /// <summary>
