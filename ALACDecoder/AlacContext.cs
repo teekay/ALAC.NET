@@ -9,6 +9,7 @@
 using System;
 using System.IO;
 using System.Diagnostics;
+using System.Linq;
 
 namespace ALACdotNET.Decoder
 {
@@ -18,27 +19,6 @@ namespace ALACdotNET.Decoder
     /// </summary>
     public class AlacContext : IDisposable
     {
-        #region Private members
-        DemuxResT demuxRes;
-        AlacFile alac;
-        BinaryReader inputStream;
-        MyStream myStream;
-        int currentSampleBlock;
-        int offset;
-        byte[] readBuffer = new byte[1024 * 80]; // sample big enough to hold any input for a single alac frame
-        int[] formatBuffer= new int[1024 * 80];
-        byte[] outputBufer = new byte[1024 * 80];
-        bool disposeStream;
-        int destBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
-        #endregion
-
-        #region Properties
-        /// <summary>
-        /// Points to the last sample read - can be used to determine position
-        /// </summary>
-        public int LastSampleNumber { get; private set; }
-        #endregion
-
         /// <summary>
         /// Initialize this AlacContext with a Stream
         /// </summary>
@@ -46,7 +26,7 @@ namespace ALACdotNET.Decoder
         /// <param name="disposeStream">Whether to dispose the stream when disposing this object</param>
         public AlacContext(Stream baseStream, bool disposeStream) : this(baseStream)
         {
-            this.disposeStream = disposeStream;
+            _disposeStream = disposeStream;
         }
 
         /// <summary>
@@ -55,90 +35,66 @@ namespace ALACdotNET.Decoder
         /// <param name="baseStream">Stream to read from</param>
         public AlacContext(Stream baseStream)
         {
-            demuxRes = new DemuxResT();
-            inputStream = new BinaryReader(baseStream);
-            myStream = new MyStream(inputStream);
-            QTMovieT qtmovie = new QTMovieT(myStream, demuxRes);
+            _demuxRes = new DemuxResT();
+            _inputStream = new BinaryReader(baseStream);
+            _myStream = new MyStream(_inputStream);
+            var qtmovie = new QTMovieT(_myStream, _demuxRes);
 
             /* if qtmovie_read returns successfully, the stream is up to
              * the movie data, which can be used directly by the decoder */
-            int headerRead = qtmovie.Read();
-
+            // I don't like throwing exceptions in constructors though
+            var headerRead = qtmovie.Read();
             if (headerRead == 0 || headerRead == 3)
             {
-                Dispose(true);
-                throw new System.IO.IOException("Error while loading the QuickTime movie headers.");
+                throw new IOException("Error while loading the QuickTime movie headers.");
             }
 
             /* initialise the sound converter */
-            alac = new AlacFile(demuxRes.sample_size, demuxRes.num_channels);
-            alac.SetInfo(demuxRes.codecdata);
+            _alac = new AlacFile(_demuxRes.sample_size, _demuxRes.num_channels);
+            _alac.SetInfo(_demuxRes.codecdata);
         }
+
+        private bool _disposedValue; // To detect redundant calls
+        private readonly DemuxResT _demuxRes;
+        private readonly AlacFile _alac;
+        private readonly BinaryReader _inputStream;
+        private readonly MyStream _myStream;
+        private int _currentSampleBlock;
+        private int _offset;
+        private readonly byte[] _readBuffer = new byte[1024 * 80]; // sample big enough to hold any input for a single alac frame
+        private readonly int[] _formatBuffer= new int[1024 * 80];
+        private byte[] _outputBufer = new byte[1024 * 80];
+        private readonly bool _disposeStream;
+        private readonly int _destBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
+
+        /// <summary>
+        /// Points to the last sample read - can be used to determine position
+        /// </summary>
+        public int LastSampleNumber { get; private set; }
 
         /// <summary>
         /// Returns the sample rate of the specified ALAC file
         /// </summary>
         /// <returns></returns>
-        public int GetSampleRate()
-        {
-            if (demuxRes.sample_rate != 0)
-            {
-                return demuxRes.sample_rate;
-            }
-            else
-            {
-                return (44100);
-            }
-        }
+        public int GetSampleRate() => _demuxRes.sample_rate != 0 ? _demuxRes.sample_rate : 0;
 
         /// <summary>
         /// Get the number of channels for this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetNumChannels()
-        {
-            if (demuxRes.num_channels != 0)
-            {
-                return demuxRes.num_channels;
-            }
-            else
-            {
-                return 2;
-            }
-        }
+        public int GetNumChannels() => _demuxRes.num_channels != 0 ? _demuxRes.num_channels : 0;
 
         /// <summary>
         /// Returns the number of bits per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBitsPerSample()
-        {
-            if (demuxRes.sample_size != 0)
-            {
-                return demuxRes.sample_size;
-            }
-            else
-            {
-                return 16;
-            }
-        }
-
+        public int GetBitsPerSample() => _demuxRes.sample_size != 0 ? _demuxRes.sample_size : 0;
 
         /// <summary>
         /// Returns the number of bytes per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBytesPerSample()
-        {
-            if (demuxRes.sample_size != 0)
-            {
-                return (int)Math.Ceiling((double)(demuxRes.sample_size / 8));
-            }
-            else
-            {
-                return 2;
-            }
-        }
+        public int GetBytesPerSample() => _demuxRes.sample_size != 0 ? (int) Math.Ceiling((double)_demuxRes.sample_size / 8) : 0;
 
         /// <summary>
         /// Get total number of samples contained in the Apple Lossless file, or -1 if unknown
@@ -146,65 +102,53 @@ namespace ALACdotNET.Decoder
         /// <returns></returns>
         public int GetNumSamples()
         {
-            /* calculate output size */
-            int num_samples = 0;
-            int thissample_duration;
-            int thissample_bytesize = 0;
-            SampleDuration sampleinfo = new SampleDuration();
-            int i;
-            int retval = 0;
-
-            for (i = 0; i < demuxRes.sample_byte_size.Length; i++)
+            try
             {
-                thissample_duration = 0;
-                thissample_bytesize = 0;
-
-                retval = GetSampleInfo(i, sampleinfo);
-
-                if (retval == 0)
-                {
-                    return (-1);
-                }
-                thissample_duration = sampleinfo.sample_duration;
-                thissample_bytesize = sampleinfo.sample_byte_size;
-
-                num_samples += thissample_duration;
+                return Enumerable.Range(0, _demuxRes.sample_byte_size.Length)
+                    .ToList()
+                    .Select(SamplesFromSampleInfo)
+                    .Sum();
             }
-
-            return (num_samples);
+            catch (SampleReadException)
+            {
+                return -1;
+            }
         }
 
-        int GetSampleInfo(int samplenum, SampleDuration sampleinfo)
+        private int SamplesFromSampleInfo(int sampleNumber)
         {
-            int duration_index_accum = 0;
-            int duration_cur_index = 0;
+            var sampleinfo = GetSampleInfo(sampleNumber);
+            return sampleinfo.SampleDuration >= 0 ? 1 : throw new SampleReadException("Could not read some sample");
+        }
 
-            if (samplenum >= demuxRes.sample_byte_size.Length)
+        private SampleDurationInfo GetSampleInfo(int samplenum)
+        {
+            int durationIndexAccum = 0;
+            int durationCurIndex = 0;
+            var emptySampleDuration = new SampleDurationInfo(0, 0);
+
+            if (samplenum >= _demuxRes.sample_byte_size.Length)
             {
-                Debug.WriteLine("sample " + samplenum + " does not exist; last="+ demuxRes.sample_byte_size.Length);
-                return 0;
+                Debug.WriteLine("sample " + samplenum + " does not exist; last="+ _demuxRes.sample_byte_size.Length);
+                return emptySampleDuration;
             }
 
-            if (demuxRes.num_time_to_samples == 0)     // was null
+            if (_demuxRes.num_time_to_samples == 0)     // was null
             {
                 Debug.WriteLine("no time to samples");
-                return 0;
+                return emptySampleDuration;
             }
-            while ((demuxRes.time_to_sample[duration_cur_index].sample_count + duration_index_accum) <= samplenum)
+            while (_demuxRes.time_to_sample[durationCurIndex].sample_count + durationIndexAccum <= samplenum)
             {
-                duration_index_accum += demuxRes.time_to_sample[duration_cur_index].sample_count;
-                duration_cur_index++;
-                if (duration_cur_index >= demuxRes.num_time_to_samples)
+                durationIndexAccum += _demuxRes.time_to_sample[durationCurIndex].sample_count;
+                durationCurIndex++;
+                if (durationCurIndex >= _demuxRes.num_time_to_samples)
                 {
                     Debug.WriteLine("sample " + samplenum + " does not have a duration");
-                    return 0;
+                    return emptySampleDuration;
                 }
             }
-
-            sampleinfo.sample_duration = demuxRes.time_to_sample[duration_cur_index].sample_duration;
-            sampleinfo.sample_byte_size = demuxRes.sample_byte_size[samplenum];
-
-            return 1;
+            return new SampleDurationInfo(_demuxRes.time_to_sample[durationCurIndex].sample_duration, _demuxRes.sample_byte_size[samplenum]);
         }
 
         /// <summary>
@@ -214,11 +158,11 @@ namespace ALACdotNET.Decoder
         /// <returns>Number of bytes read</returns>
         public int Read(byte[] buffer)
         {
-            int bytesRead = UnpackSamples(formatBuffer);
+            int bytesRead = UnpackSamples(_formatBuffer);
             if (bytesRead > 0)
             {
-                outputBufer = formatSamples(GetBytesPerSample(), formatBuffer, bytesRead);
-                Array.Copy(outputBufer, 0, buffer, 0, bytesRead);
+                _outputBufer = FormatSamples(GetBytesPerSample(), _formatBuffer, bytesRead);
+                Array.Copy(_outputBufer, 0, buffer, 0, bytesRead);
             }
             return bytesRead;
         }
@@ -228,42 +172,35 @@ namespace ALACdotNET.Decoder
         /// </summary>
         /// <param name="pDestBuffer">Buffer to read into</param>
         /// <returns>Number of bytes decoded</returns>
-        int UnpackSamples(int[] pDestBuffer)
+        private int UnpackSamples(int[] pDestBuffer)
         {
-            int sample_byte_size;
-            SampleDuration sampleinfo = new SampleDuration();
-            int outputBytes;            
-
- 
             // if current_sample_block is beyond last block then finished
-
-            if (currentSampleBlock >= demuxRes.sample_byte_size.Length)
+            if (_currentSampleBlock >= _demuxRes.sample_byte_size.Length)
             {
                 // Sample past this stream's length
                 return 0;
             }
 
-            if (GetSampleInfo(currentSampleBlock, sampleinfo) == 0)
+            var sampleinfo = GetSampleInfo(_currentSampleBlock);
+            if (sampleinfo.SampleDuration == 0)
             {
                 // getting sample failed
-                System.Diagnostics.Debug.WriteLine("getting sample failed");
+                Debug.WriteLine("getting sample failed");
                 return 0;
             }
 
-            sample_byte_size = sampleinfo.sample_byte_size;
-
-            myStream.Read(sample_byte_size, readBuffer, 0);
+            var sampleByteSize = sampleinfo.SampleByteSize;
+            _myStream.Read(sampleByteSize, _readBuffer, 0);
 
             /* now fetch */
-            outputBytes = destBufferSize;
+            var outputBytes = _destBufferSize;
+            outputBytes = _alac.DecodeFrame(_readBuffer, pDestBuffer, outputBytes);
 
-            outputBytes = alac.DecodeFrame(readBuffer, pDestBuffer, outputBytes);
-
-            currentSampleBlock = currentSampleBlock + 1;
-            LastSampleNumber += sampleinfo.sample_duration;
-            outputBytes -= offset * GetBytesPerSample();
-            Array.Copy(pDestBuffer, offset, pDestBuffer, 0, outputBytes);
-             offset = 0;
+            _currentSampleBlock = _currentSampleBlock + 1;
+            LastSampleNumber += sampleinfo.SampleDuration;
+            outputBytes -= _offset * GetBytesPerSample();
+            Array.Copy(pDestBuffer, _offset, pDestBuffer, 0, outputBytes);
+             _offset = 0;
             return outputBytes;
 
         }
@@ -276,9 +213,9 @@ namespace ALACdotNET.Decoder
         /// <param name="src"></param>
         /// <param name="samcnt"></param>
         /// <returns></returns>
-        static byte[] formatSamples(int bps, int[] src, int samcnt)
+        private static byte[] FormatSamples(int bps, int[] src, int samcnt)
         {
-            int temp = 0;
+            int temp;
             int counter = 0;
             int counter2 = 0;
             byte[] dst = new byte[65536];
@@ -321,73 +258,56 @@ namespace ALACdotNET.Decoder
             return dst;
         }
 
-
-
         ///<summary>
         /// Sets position in pcm samples
         ///<param name="position">position in pcm samples to go to</param> 
         ///</summary>
         public void SetPosition(long position)
         {
-            int current_position = 0;
-            int current_sample = 0;
-            SampleDuration sample_info = new SampleDuration();
-            ChunkInfo chunkInfo;
-            for (int i = 0; i < demuxRes.stsc.Length; i++)
+            int currentPosition = 0;
+            int currentSample = 0;
+            for (int i = 0; i < _demuxRes.stsc.Length; i++)
             {
-                chunkInfo = demuxRes.stsc[i];
-                int last_chunk;
+                var chunkInfo = _demuxRes.stsc[i];
+                var lastChunk = i < _demuxRes.stsc.Length - 1 ? _demuxRes.stsc[i + 1].first_chunk : _demuxRes.stco.Length;
 
-                if (i < demuxRes.stsc.Length - 1)
+                for (int chunk = chunkInfo.first_chunk; chunk <= lastChunk; chunk++)
                 {
-                    last_chunk = demuxRes.stsc[i + 1].first_chunk;
-                }
-                else
-                {
-                    last_chunk = demuxRes.stco.Length;
-                }
-
-                for (int chunk = chunkInfo.first_chunk; chunk <= last_chunk; chunk++)
-                {
-                    int pos = demuxRes.stco[chunk - 1];
-                    int sample_count = chunkInfo.samples_per_chunk;
-                    while (sample_count > 0)
+                    int pos = _demuxRes.stco[chunk - 1];
+                    int sampleCount = chunkInfo.samples_per_chunk;
+                    while (sampleCount > 0)
                     {
-                        int ret = GetSampleInfo(current_sample, sample_info);
-                        if (ret == 0) break;
-                        current_position += sample_info.sample_duration;
-                        if (position < current_position)
+                        var sampleInfo = GetSampleInfo(currentSample);
+                        if (sampleInfo.SampleDuration == 0) break;
+                        currentPosition += sampleInfo.SampleDuration;
+                        if (position < currentPosition)
                         {
-                            inputStream.BaseStream.Seek(pos, SeekOrigin.Begin);
-                            currentSampleBlock = current_sample;
-                            LastSampleNumber = current_position;
-                            offset =
-                                    (int)(position - (current_position - sample_info.sample_duration))
+                            _inputStream.BaseStream.Seek(pos, SeekOrigin.Begin);
+                            _currentSampleBlock = currentSample;
+                            LastSampleNumber = currentPosition;
+                            _offset =
+                                    (int)(position - (currentPosition - sampleInfo.SampleDuration))
                                             * GetNumChannels();
                             return;
                         }
-                        pos += sample_info.sample_byte_size;
-                        current_sample++;
-                        sample_count--;
+                        pos += sampleInfo.SampleByteSize;
+                        currentSample++;
+                        sampleCount--;
                     }
                 }
             }
         }
 
 
-        #region IDisposable Support
-        private bool disposedValue = false; // To detect redundant calls
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!disposedValue)
+            if (_disposedValue) return;
+            if (disposing && _disposeStream)
             {
-                if (disposing && disposeStream && inputStream != null)
-                {
-                    inputStream.Dispose();
-                }
-                disposedValue = true;
+                _inputStream?.Dispose();
             }
+            _disposedValue = true;
         }
 
 
@@ -397,12 +317,24 @@ namespace ALACdotNET.Decoder
             // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
             Dispose(true);
         }
-        #endregion
 
-        class SampleDuration
+        private class SampleDurationInfo
         {
-            public int sample_byte_size { get; set; }
-            public int sample_duration { get; set; }
+            public SampleDurationInfo(int sampleByteSize, int sampleDuration)
+            {
+                SampleByteSize = sampleByteSize;
+                SampleDuration = sampleDuration;
+            }
+
+            public int SampleByteSize { get; }
+            public int SampleDuration { get; }
+        }
+
+        private class SampleReadException : Exception
+        {
+            public SampleReadException(string message) : base(message)
+            {
+            }
         }
     }
 }

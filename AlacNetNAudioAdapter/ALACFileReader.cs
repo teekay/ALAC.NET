@@ -5,11 +5,13 @@
 **                       
 ** Distributed under the BSD Software License (see license.txt)  
 **/
+
 using System;
 using System.IO;
+using ALACdotNET.Decoder;
 using NAudio.Wave;
 
-namespace ALACdotNET.Decoder
+namespace AlacNetNAudioAdapter
 {
     /// <summary>
     /// NAudio adapter for the ALACSharp library
@@ -17,19 +19,8 @@ namespace ALACdotNET.Decoder
     /// In order to be able to use this library across all .NET platforms including Metro and Windows Phone,
     /// this class does not provide a constructor taking a filename as an argument.
     /// </summary>
-    public class ALACFileReader : WaveStream, IDisposable
+    public class ALACFileReader : WaveStream
     {
-        readonly WaveFormat waveFormat;
-        long length;
-        AlacContext ac;
-        int decompressLeftovers;
-        int decompressBufferOffset;
-        readonly byte[] decompressBuffer;
-        byte[] pcmBuffer = new byte[65536];
-        const int destBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
-        int[] pDestBuffer = new int[destBufferSize];
-        object repositionLock = new object();
-
         /// <summary>
         /// Create a new ALACFileReader
         /// The underlying ALAC stream will NOT be disposed after use
@@ -47,37 +38,37 @@ namespace ALACdotNET.Decoder
         /// <param name="disposeAfterUse">Whether to dispose of the underlying stream on disposal</param>
         public ALACFileReader(Stream baseStream, bool disposeAfterUse)
         {
-            ac = new AlacContext(baseStream, disposeAfterUse);
-            waveFormat = new WaveFormat(ac.GetSampleRate(), ac.GetBytesPerSample() * 8, ac.GetNumChannels());
-            length = ac.GetNumSamples() * waveFormat.BlockAlign;
-            decompressBuffer = new byte[65546 * waveFormat.BitsPerSample / 8 * waveFormat.Channels];
+            _alacContext = new AlacContext(baseStream, disposeAfterUse);
+            _waveFormat = new WaveFormat(_alacContext.GetSampleRate(), _alacContext.GetBytesPerSample() * 8, _alacContext.GetNumChannels());
+            Length = _alacContext.GetNumSamples() * _waveFormat.BlockAlign;
+            _decompressBuffer = new byte[65546 * _waveFormat.BitsPerSample / 8 * _waveFormat.Channels];
         }
+
+        private readonly WaveFormat _waveFormat;
+        private readonly AlacContext _alacContext;
+        private int _decompressLeftovers;
+        private int _decompressBufferOffset;
+        private readonly byte[] _decompressBuffer;
+        private const int DestBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
+        private readonly object _repositionLock = new object();
 
         /// <summary>
         /// Get the length of the uncompressed wave stream in bytes
         /// </summary>
-        public override long Length
-        {
-            get { return length; }
-        }
+        public override long Length { get; }
 
         /// <summary>
         /// Get / set the position within the wave stream
         /// </summary>
         public override long Position
         {
-            get
-            {
-                var pos = ac.LastSampleNumber * waveFormat.BlockAlign;
-                return pos;
-            }
-
+            get => _alacContext.LastSampleNumber * _waveFormat.BlockAlign;
             set
             {
-                lock(repositionLock)
+                lock(_repositionLock)
                 {
-                    ac.SetPosition(value / waveFormat.BlockAlign);
-                    decompressLeftovers = 0; // ... so that after repositioning, we don't return any more data from the buffer
+                    _alacContext.SetPosition(value / _waveFormat.BlockAlign);
+                    _decompressLeftovers = 0; // ... so that after repositioning, we don't return any more data from the buffer
                 }
             }
         }
@@ -85,14 +76,9 @@ namespace ALACdotNET.Decoder
         /// <summary>
         /// Get the WaveFormat for this stream
         /// </summary>
-        public override WaveFormat WaveFormat
-        {
-            get
-            {
-                return waveFormat;
-            }
-        }
+        public override WaveFormat WaveFormat => _waveFormat;
 
+        /// <inheritdoc />
         /// <summary>
         /// Read from this stream
         /// </summary>
@@ -103,33 +89,27 @@ namespace ALACdotNET.Decoder
         public override int Read(byte[] buffer, int offset, int count)
         {
             int bytesRead = 0;
-            lock (repositionLock)
+            lock (_repositionLock)
             {
                 while (bytesRead < count)
                 {
-                    if (decompressLeftovers > 0)
+                    if (_decompressLeftovers > 0)
                     {
-                        var toCopy = Math.Min(decompressLeftovers, count - bytesRead);
-                        Array.Copy(decompressBuffer, decompressBufferOffset, buffer, offset, toCopy);
-                        decompressLeftovers -= toCopy;
-                        if (decompressLeftovers == 0)
-                        {
-                            decompressBufferOffset = 0;
-                        }
-                        else
-                        {
-                            decompressBufferOffset += toCopy;
-                        }
+                        var toCopy = Math.Min(_decompressLeftovers, count - bytesRead);
+                        Array.Copy(_decompressBuffer, _decompressBufferOffset, buffer, offset, toCopy);
+                        _decompressLeftovers -= toCopy;
+                        _decompressBufferOffset = _decompressLeftovers == 0
+                            ? 0
+                            : _decompressBufferOffset + toCopy;
                         bytesRead += toCopy;
                         offset += toCopy;
                     }
-                    if (bytesRead == count) break;
-                    decompressBufferOffset = 0;
+                    if (bytesRead >= count) break;
+                    _decompressBufferOffset = 0;
 
-                    int bytes_unpacked = ac.Read(decompressBuffer);
-                    if (bytes_unpacked == 0)
-                        break;
-                    decompressLeftovers += bytes_unpacked;
+                    int bytesUnpacked = _alacContext.Read(_decompressBuffer);
+                    if (bytesUnpacked == 0) break;
+                    _decompressLeftovers += bytesUnpacked;
                 }
             }
             return bytesRead;
@@ -137,13 +117,10 @@ namespace ALACdotNET.Decoder
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && ac != null)
+            if (!disposing) return;
+            lock(_repositionLock)
             {
-                lock(repositionLock)
-                {
-                    ac.Dispose();
-                }
-                ac = null;
+                _alacContext.Dispose();
             }
         }
     }
