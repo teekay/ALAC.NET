@@ -1,5 +1,5 @@
 ﻿/**
-** Copyright (c) 2015 Tomas Kohl
+** Copyright (c) 2015 - 2018 Tomas Kohl
 **
 ** All Rights Reserved.
 **                       
@@ -7,7 +7,7 @@
 **/
 
 using System;
-using ALACdotNET.Decoder;
+using AlacNetNAudioAdapter;
 using NAudio.Wave;
 
 namespace ALACDecoderDemo
@@ -21,10 +21,8 @@ namespace ALACDecoderDemo
         /// <param name="args"></param>
         static void Main(string[] args)
         {
-            string path = string.Empty;
-            if (args.Length > 0)
-                path = args[0];
-            else
+            var path = args.Length > 0 ? args[0] : string.Empty;
+            if (string.IsNullOrEmpty(path))
             {
                 Console.WriteLine("Provide a path to an ALAC file as an argument");
                 return;
@@ -54,10 +52,15 @@ namespace ALACDecoderDemo
                         Console.ReadKey();
                     }
                 }
-                catch (System.IO.IOException)
+                catch (System.IO.IOException e)
                 {
-                    Console.WriteLine("Not a valid ALAC file.");
-                    return;
+                    Console.WriteLine("Problem reading ALAC file.");
+                    Console.WriteLine(e.Message);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Problem playing back ALAC file.");
+                    Console.WriteLine(e.Message);
                 }
             }
         }
