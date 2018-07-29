@@ -1,5 +1,5 @@
 ﻿/**
-** Copyright (c) 2015 Tomas Kohl
+** Copyright (c) 2015 - 2018 Tomas Kohl
 ** Based on Java Apple Lossless Decoder - Copyright (c) 2011 Peter McQuillan, https://github.com/soiaf/Java-Apple-Lossless-decoder
 **
 ** All Rights Reserved.
@@ -9,10 +9,20 @@
 
 namespace ALACdotNET.Decoder
 {
+    /// <summary>
+    /// Seems to hold metadata about a chunk (of bytes).
+    /// </summary>
     internal class ChunkInfo
     {
-        public int first_chunk { get; set; }
-        public int samples_per_chunk { get; set; }
-        public int sample_desc_index { get; set; }
+        public ChunkInfo(int firstChunk, int samplesPerChunk, int sampleDescIndex)
+        {
+            FirstChunk = firstChunk;
+            SamplesPerChunk = samplesPerChunk;
+            SampleDescIndex = sampleDescIndex;
+        }
+
+        public int FirstChunk { get; }
+        public int SamplesPerChunk { get; }
+        public int SampleDescIndex { get; }
     }
 }

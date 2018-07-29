@@ -38,21 +38,21 @@ namespace ALACdotNET.Decoder
             _demuxRes = new DemuxResT();
             _inputStream = new BinaryReader(baseStream);
             _myStream = new MyStream(_inputStream);
-            var qtmovie = new QTMovieT(_myStream, _demuxRes);
+            var qtmovie = new QtMovieT(_myStream, _demuxRes);
 
             /* if qtmovie_read returns successfully, the stream is up to
              * the movie data, which can be used directly by the decoder */
             // I don't like throwing exceptions in constructors though
-            int headerRead = qtmovie.Read();
-            if (headerRead == 0 || headerRead == 3)
+            var headerRead = qtmovie.ReadHeader();
+            if (headerRead == MdatPosStatus.None || headerRead == MdatPosStatus.CannotSeekToMdatPosition)
             {
                 SelfDispose(true);
                 throw new IOException("Error while loading the QuickTime movie headers.");
             }
 
             /* initialise the sound converter */
-            _alac = new AlacFile(_demuxRes.sample_size, _demuxRes.num_channels);
-            _alac.SetInfo(_demuxRes.codecdata);
+            _alac = new AlacFile(_demuxRes.SampleSize, _demuxRes.NumChannels);
+            _alac.SetInfo(_demuxRes.CodecData);
         }
 
         private readonly DemuxResT _demuxRes;
@@ -80,25 +80,25 @@ namespace ALACdotNET.Decoder
         /// Returns the sample rate of the specified ALAC file
         /// </summary>
         /// <returns></returns>
-        public int GetSampleRate() => _demuxRes.sample_rate != 0 ? _demuxRes.sample_rate : 44100;
+        public int GetSampleRate() => _demuxRes.SampleRate != 0 ? _demuxRes.SampleRate : 44100;
 
         /// <summary>
         /// Get the number of channels for this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetNumChannels() => _demuxRes.num_channels != 0 ? _demuxRes.num_channels : 2;
+        public int GetNumChannels() => _demuxRes.NumChannels != 0 ? _demuxRes.NumChannels : 2;
 
         /// <summary>
         /// Returns the number of bits per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBitsPerSample() => _demuxRes.sample_size != 0 ? _demuxRes.sample_size :16;
+        public int GetBitsPerSample() => _demuxRes.SampleSize != 0 ? _demuxRes.SampleSize :16;
 
         /// <summary>
         /// Returns the number of bytes per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBytesPerSample() => _demuxRes.sample_size != 0 ? (int)Math.Ceiling((double)_demuxRes.sample_size / 8) : 2;
+        public int GetBytesPerSample() => _demuxRes.SampleSize != 0 ? (int)Math.Ceiling((double)_demuxRes.SampleSize / 8) : 2;
 
 
         /// <summary>
@@ -110,7 +110,7 @@ namespace ALACdotNET.Decoder
             /* calculate output size */
             try
             {
-                return Enumerable.Range(0, _demuxRes.sample_byte_size.Length)
+                return Enumerable.Range(0, _demuxRes.SampleByteSize.Length)
                     .ToList()
                     .Select(SamplesFromSampleInfo)
                     .Sum();
@@ -131,27 +131,27 @@ namespace ALACdotNET.Decoder
         {
             int durationIndexAccum = 0;
             int durationCurIndex = 0;
-            if (samplenum >= _demuxRes.sample_byte_size.Length)
+            if (samplenum >= _demuxRes.SampleByteSize.Length)
             {
-                Debug.WriteLine("sample " + samplenum + " does not exist; last=" + _demuxRes.sample_byte_size.Length);
+                Debug.WriteLine("sample " + samplenum + " does not exist; last=" + _demuxRes.SampleByteSize.Length);
                 return null;
             }
-            if (_demuxRes.num_time_to_samples == 0)     // was null
+            if (_demuxRes.NumTimeToSamples == 0)     // was null
             {
                 Debug.WriteLine("no time to samples");
                 return null;
             }
-            while ((_demuxRes.time_to_sample[durationCurIndex].sample_count + durationIndexAccum) <= samplenum)
+            while ((_demuxRes.TimeToSample[durationCurIndex].SampleCount + durationIndexAccum) <= samplenum)
             {
-                durationIndexAccum += _demuxRes.time_to_sample[durationCurIndex].sample_count;
+                durationIndexAccum += _demuxRes.TimeToSample[durationCurIndex].SampleCount;
                 durationCurIndex++;
-                if (durationCurIndex >= _demuxRes.num_time_to_samples)
+                if (durationCurIndex >= _demuxRes.NumTimeToSamples)
                 {
                     Debug.WriteLine("sample " + samplenum + " does not have a duration");
                     return null;
                 }
             }
-            SampleDurationInfo sampleinfo = new SampleDurationInfo(_demuxRes.sample_byte_size[samplenum], _demuxRes.time_to_sample[durationCurIndex].sample_duration);
+            SampleDurationInfo sampleinfo = new SampleDurationInfo(_demuxRes.SampleByteSize[samplenum], _demuxRes.TimeToSample[durationCurIndex].SampleDuration);
             return sampleinfo;
         }
 
@@ -179,7 +179,7 @@ namespace ALACdotNET.Decoder
         private int UnpackSamples(int[] pDestBuffer)
         {
             // if current_sample_block is beyond last block then finished
-            if (_currentSampleBlock >= _demuxRes.sample_byte_size.Length)
+            if (_currentSampleBlock >= _demuxRes.SampleByteSize.Length)
             {
                 // Sample past this stream's length
                 return 0;
@@ -263,14 +263,14 @@ namespace ALACdotNET.Decoder
         {
             int currentPosition = 0;
             int currentSample = 0;
-            for (int i = 0; i < _demuxRes.stsc.Length; i++)
+            for (int i = 0; i < _demuxRes.Stsc.Length; i++)
             {
-                var chunkInfo = _demuxRes.stsc[i];
-                var lastChunk = i < _demuxRes.stsc.Length - 1 ? _demuxRes.stsc[i + 1].first_chunk : _demuxRes.stco.Length;
-                for (int chunk = chunkInfo.first_chunk; chunk <= lastChunk; chunk++)
+                var chunkInfo = _demuxRes.Stsc[i];
+                var lastChunk = i < _demuxRes.Stsc.Length - 1 ? _demuxRes.Stsc[i + 1].FirstChunk : _demuxRes.Stco.Length;
+                for (int chunk = chunkInfo.FirstChunk; chunk <= lastChunk; chunk++)
                 {
-                    int pos = _demuxRes.stco[chunk - 1];
-                    int sampleCount = chunkInfo.samples_per_chunk;
+                    int pos = _demuxRes.Stco[chunk - 1];
+                    int sampleCount = chunkInfo.SamplesPerChunk;
                     while (sampleCount > 0)
                     {
                         var sampleInfo = TryGetSampleInfo(currentSample);

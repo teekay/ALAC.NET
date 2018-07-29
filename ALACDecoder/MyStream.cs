@@ -1,5 +1,5 @@
 ﻿/**
-** Copyright (c) 2015 Tomas Kohl
+** Copyright (c) 2015 - 2018 Tomas Kohl
 ** Based on Java Apple Lossless Decoder - Copyright (c) 2011 Peter McQuillan, https://github.com/soiaf/Java-Apple-Lossless-decoder
 **
 ** All Rights Reserved.
@@ -11,27 +11,29 @@ using System.IO;
 
 namespace ALACdotNET.Decoder
 {
-    class MyStream
+    internal sealed class MyStream
     {
         public MyStream(BinaryReader bReader)
         {
-            binaryReader = bReader;
+            _binaryReader = bReader;
         }
 
-        BinaryReader binaryReader;
+        private readonly BinaryReader _binaryReader;
+        private readonly byte[] _readBuffer = new byte[8];
+
         public long Position { get; private set; }
 
         /// <summary>
         /// Indicates whether the stream has reached the end
         /// </summary>
-        public bool EOF
-        {
-            // TODO
-            get { return binaryReader.BaseStream.Position == binaryReader.BaseStream.Length; }
-        }
+        public bool EOF => _binaryReader.BaseStream.Position >= _binaryReader.BaseStream.Length;
 
-        public byte[] read_buf { get; set; } = new byte[8];
-
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="size"></param>
+        /// <param name="buf"></param>
+        /// <param name="startPos"></param>
         public void Read(int size, int[] buf, int startPos)
         {
             byte[] byteBuf = new byte[size];
@@ -44,76 +46,57 @@ namespace ALACdotNET.Decoder
 
         public int Read(int size, byte[] buf, int startPos)
         {
-            int bytes_read = 0;
-            bytes_read = binaryReader.Read(buf, startPos, size);
+            var bytes_read = _binaryReader.Read(buf, startPos, size);
             Position = Position + bytes_read;
             return bytes_read;
         }
 
         public int ReadUint32()
         {
-            int v = 0;
-            int tmp = 0;
-            int bytes_read = 0;
-
-            bytes_read = binaryReader.Read(read_buf, 0, 4);
+            var bytes_read = _binaryReader.Read(_readBuffer, 0, 4);
             Position = Position + bytes_read;
-            tmp = (read_buf[0] & 0xff);
-
-            v = tmp << 24;
-            tmp = (read_buf[1] & 0xff);
-
-            v = v | (tmp << 16);
-            tmp = (read_buf[2] & 0xff);
-
-            v = v | (tmp << 8);
-
-            tmp = (read_buf[3] & 0xff);
-            v = v | tmp;
-
-            return v;
+            var interMediate = _readBuffer[0] & 0xff;
+            var value = interMediate << 24;
+            interMediate = _readBuffer[1] & 0xff;
+            value = value | (interMediate << 16);
+            interMediate = _readBuffer[2] & 0xff;
+            value = value | (interMediate << 8);
+            interMediate = _readBuffer[3] & 0xff;
+            value = value | interMediate;
+            return value;
         }
 
         public int ReadInt16()
         {
-            int v = 0;
-            v = binaryReader.ReadInt16();
+            int v = _binaryReader.ReadInt16();
             Position = Position + 2;
             return v;
         }
 
         public int ReadUint16()
         {
-            int v = 0;
-            int tmp = 0;
-            int bytes_read = 0;
-
-            bytes_read = binaryReader.Read(read_buf, 0, 2);
-            Position = Position + bytes_read;
-            tmp = (read_buf[0] & 0xff);
-            v = tmp << 8;
-            tmp = (read_buf[1] & 0xff);
-
-            v = v | tmp;
-
-            return v;
+            var bytesRead = _binaryReader.Read(_readBuffer, 0, 2);
+            Position = Position + bytesRead;
+            var interMediate = _readBuffer[0] & 0xff;
+            var value = interMediate << 8;
+            interMediate = _readBuffer[1] & 0xff;
+            value = value | interMediate;
+            return value;
         }
 
         public int ReadUint8()
         {
-            int v = 0;
-            int bytes_read = binaryReader.Read(read_buf, 0, 1);
-            v = (read_buf[0] & 0xff);
+            _binaryReader.Read(_readBuffer, 0, 1);
+            var value = _readBuffer[0] & 0xff;
             Position = Position + 1;
-
-            return v;
+            return value;
         }
 
         public void Skip(int skip)
         {
             if (skip < 0)
                 throw new ArgumentException("Request to seek backwards in stream is not supported");
-            var bytes_read = binaryReader.BaseStream.Seek(skip, SeekOrigin.Current);
+            var bytes_read = _binaryReader.BaseStream.Seek(skip, SeekOrigin.Current);
             Position = Position + bytes_read;
         }
 
@@ -121,14 +104,13 @@ namespace ALACdotNET.Decoder
         {
             try
             {
-                var bytesRead = binaryReader.BaseStream.Seek(pos, SeekOrigin.Begin);
-                return binaryReader.BaseStream.Position;
+                _binaryReader.BaseStream.Seek(pos, SeekOrigin.Begin);
+                return _binaryReader.BaseStream.Position;
             }
             catch
             {
                 return -1;
             }
         }
-
     }
 }

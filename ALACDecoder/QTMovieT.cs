@@ -8,509 +8,419 @@
 **/
 using System;
 using System.Diagnostics;
-
 namespace ALACdotNET.Decoder
 {
-    class QTMovieT
+    internal class QtMovieT
     {
-        MyStream qtstream;
-        DemuxResT res;
-        long saved_mdat_pos;
-
-        public QTMovieT(MyStream stream, DemuxResT demux)
+        private readonly MyStream _qtStream;
+        private readonly DemuxResT _demuxRes;
+        private long _savedMdatPos;
+        public QtMovieT(MyStream stream, DemuxResT demux)
         {
-            qtstream = stream;
-            res = demux;
+            _qtStream = stream;
+            _demuxRes = demux;
         }
 
-        static int MakeFourCC(int ch0, int ch1, int ch2, int ch3)
+        private static int MakeFourCc(int ch0, int ch1, int ch2, int ch3)
         {
             return (((ch0) << 24) | ((ch1) << 16) | ((ch2) << 8) | ((ch3)));
         }
 
-        static int MakeFourCC32(int ch0, int ch1, int ch2, int ch3)
+        private static int MakeFourCc32(int ch0, int ch1, int ch2, int ch3)
         {
-            int retval = 0;
             int tmp = ch0;
-
-            retval = tmp << 24;
-
+            var retval = tmp << 24;
             tmp = ch1;
-
             retval = retval | (tmp << 16);
             tmp = ch2;
-
             retval = retval | (tmp << 8);
             tmp = ch3;
-
             retval = retval | tmp;
-
-            return (retval);
+            return retval;
         }
 
-        static string SplitFourCC(int code)
+        private static string SplitFourCc(int code)
         {
-            string retstr;
-            char c1;
-            char c2;
-            char c3;
-            char c4;
-
-            c1 = (char)((code >> 24) & 0xFF);
-            c2 = (char)((code >> 16) & 0xFF);
-            c3 = (char)((code >> 8) & 0xFF);
-            c4 = (char)(code & 0xFF);
-            retstr = c1 + " " + c2 + " " + c3 + " " + c4;
-
-            return retstr;
-
+            var c1 = (char)((code >> 24) & 0xFF);
+            var c2 = (char)((code >> 16) & 0xFF);
+            var c3 = (char)((code >> 8) & 0xFF);
+            var c4 = (char)(code & 0xFF);
+            return c1 + " " + c2 + " " + c3 + " " + c4;
         }
 
-        public int Read()
+        public MdatPosStatus ReadHeader()
         {
-            int found_moov = 0;
-            int found_mdat = 0;
-
+            int foundMoov = 0;
+            int foundMdat = 0;
             /* read the chunks */
             while (true)
             {
-                int chunk_len;
-                int chunk_id = 0;
-
-                chunk_len = qtstream.ReadUint32();
-
-                if (qtstream.EOF)
+                var chunkLen = _qtStream.ReadUint32();
+                if (_qtStream.EOF) return 0;
+                var chunkId = _qtStream.ReadUint32();
+                if (chunkId == MakeFourCc32(102, 116, 121, 112))   // fourcc equals ftyp
                 {
-                    return 0;
+                    ReadChunkFtyp(chunkLen);
                 }
-
-                chunk_id = qtstream.ReadUint32();
-
-                if (chunk_id == MakeFourCC32(102, 116, 121, 112))   // fourcc equals ftyp
+                else if (chunkId == MakeFourCc32(109, 111, 111, 118))  // fourcc equals moov
                 {
-                    read_chunk_ftyp(chunk_len);
-                }
-                else if (chunk_id == MakeFourCC32(109, 111, 111, 118))  // fourcc equals moov
-                {
-                    if (read_chunk_moov(chunk_len) == 0)
-                        return 0; // failed to read moov, can't do anything
-                    if (found_mdat != 0)
+                    if (ReadChunkMoov(chunkLen) == 0)
                     {
-                        return set_saved_mdat();
+                        return MdatPosStatus.None; // failed to read moov, can't do anything
                     }
-                    found_moov = 1;
+
+                    if (foundMdat != 0)
+                    {
+                        return SetSavedMdat(); // suspicious - doesn't the caller expect "number of bytes read"?
+                    }
+                    foundMoov = 1;
                 }
                 /* if we hit mdat before we've found moov, record the position
 				 * and move on. We can then come back to mdat later.
 				 * This presumes the stream supports seeking backwards.
 				 */
-                else if (chunk_id == MakeFourCC32(109, 100, 97, 116))   // fourcc equals mdat
+                else if (chunkId == MakeFourCc32(109, 100, 97, 116))   // fourcc equals mdat
                 {
-                    int not_found_moov = 0;
-                    if (found_moov == 0)
-                        not_found_moov = 1;
-                    read_chunk_mdat(chunk_len, not_found_moov);
-                    if (found_moov != 0)
+                    int notFoundMoov = 0;
+                    if (foundMoov == 0)
+                        notFoundMoov = 1;
+                    ProcReadChunkMdat(chunkLen, notFoundMoov);
+                    if (foundMoov != 0)
                     {
-                        return 1;
+                        return MdatPosStatus.Ok;
                     }
-                    found_mdat = 1;
+                    foundMdat = 1;
                 }
                 /*  these following atoms can be skipped !!!! */
-                else if (chunk_id == MakeFourCC32(102, 114, 101, 101))  // fourcc equals free
+                else if (chunkId == MakeFourCc32(102, 114, 101, 101))  // fourcc equals free
                 {
-                    qtstream.Skip(chunk_len - 8); // FIXME not 8
+                    _qtStream.Skip(chunkLen - 8); // FIXME not 8
                 }
-                else if (chunk_id == MakeFourCC32(106, 117, 110, 107))     // fourcc equals junk
+                else if (chunkId == MakeFourCc32(106, 117, 110, 107))     // fourcc equals junk
                 {
-                    qtstream.Skip(chunk_len - 8); // FIXME not 8
+                    _qtStream.Skip(chunkLen - 8); // FIXME not 8
                 }
                 else
                 {
-                    Debug.WriteLine("(top) unknown chunk id: " + chunk_id + ", " + SplitFourCC(chunk_id));
-                    return 0;
+                    Debug.WriteLine("(top) unknown chunk id: " + chunkId + ", " + SplitFourCc(chunkId));
+                    return MdatPosStatus.None;
                 }
             }
         }
 
-        void read_chunk_ftyp(int chunk_len)
+        private void ReadChunkFtyp(int chunkLen)
         {
-            int type = 0;
-            int minor_ver = 0;
-            int size_remaining = chunk_len - 8; // FIXME: can't hardcode 8, size may be 64bit
-
-            type = qtstream.ReadUint32();
-            size_remaining -= 4;
-
-            if (type != MakeFourCC32(77, 52, 65, 32))       // "M4A " ascii values
+            int sizeRemaining = chunkLen - 8; // FIXME: can't hardcode 8, size may be 64bit
+            var type = _qtStream.ReadUint32();
+            sizeRemaining -= 4;
+            if (type != MakeFourCc32(77, 52, 65, 32))       // "M4A " ascii values
             {
                 Debug.WriteLine("not M4A file");
                 return;
             }
-            minor_ver = qtstream.ReadUint32();
-            size_remaining -= 4;
-
+            // ReSharper disable once UnusedVariable
+            int minorVer = _qtStream.ReadUint32();
+            sizeRemaining -= 4;
             /* compatible brands */
-            while (size_remaining != 0)
+            while (sizeRemaining != 0)
             {
                 /* unused */
                 /*fourcc_t cbrand =*/
-                qtstream.ReadUint32();
-                size_remaining -= 4;
+                _qtStream.ReadUint32();
+                sizeRemaining -= 4;
             }
         }
 
         /* 'trak' - a movie track - contains other atoms */
-        int read_chunk_trak(int chunk_len)
+        private int ReadChunkTrak(int chunkLen)
         {
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            while (size_remaining != 0)
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            while (sizeRemaining != 0)
             {
-                int sub_chunk_len;
-                int sub_chunk_id = 0;
-
+                int subChunkLen;
                 try
                 {
-                    sub_chunk_len = (qtstream.ReadUint32());
+                    subChunkLen = (_qtStream.ReadUint32());
                 }
                 catch (Exception e)
                 {
                     Debug.WriteLine("(read_chunk_trak) error reading sub_chunk_len - possibly number too large: {0}", e);
-                    sub_chunk_len = 0;
+                    subChunkLen = 0;
                 }
-
-                if (sub_chunk_len <= 1 || sub_chunk_len > size_remaining)
+                if (subChunkLen <= 1 || subChunkLen > sizeRemaining)
                 {
                     Debug.WriteLine("strange size for chunk inside trak");
                     return 0;
                 }
-
-                sub_chunk_id = qtstream.ReadUint32();
-
-                if (sub_chunk_id == MakeFourCC32(116, 107, 104, 100))   // fourcc equals tkhd
+                var subChunkId = _qtStream.ReadUint32();
+                if (subChunkId == MakeFourCc32(116, 107, 104, 100))   // fourcc equals tkhd
                 {
-                    read_chunk_tkhd(sub_chunk_len);
+                    SkipOverChunkTkhd(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(109, 100, 105, 97))   // fourcc equals mdia
+                else if (subChunkId == MakeFourCc32(109, 100, 105, 97))   // fourcc equals mdia
                 {
-                    if (read_chunk_mdia(sub_chunk_len) == 0)
+                    if (ReadChunkMedia(subChunkLen) == 0)
                         return 0;
                 }
-                else if (sub_chunk_id == MakeFourCC32(101, 100, 116, 115))  // fourcc equals edts
+                else if (subChunkId == MakeFourCc32(101, 100, 116, 115))  // fourcc equals edts
                 {
-                    read_chunk_edts(sub_chunk_len);
+                    SkipOverChunkEdts(subChunkLen);
                 }
                 else
                 {
-                    Debug.WriteLine("(trak) unknown chunk id: " + SplitFourCC(sub_chunk_id));
+                    Debug.WriteLine("(trak) unknown chunk id: " + SplitFourCc(subChunkId));
                     return 0;
                 }
-
-                size_remaining -= sub_chunk_len;
+                sizeRemaining -= subChunkLen;
             }
-
             return 1;
         }
 
-
-        int read_chunk_stbl(int chunk_len)
+        private int ReadChunkStbl(int chunkLen)
         {
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            while (size_remaining != 0)
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            while (sizeRemaining != 0)
             {
-                int sub_chunk_len;
-                int sub_chunk_id = 0;
-
+                int subChunkLen;
                 try
                 {
-                    sub_chunk_len = (qtstream.ReadUint32());
+                    subChunkLen = (_qtStream.ReadUint32());
                 }
                 catch (Exception e)
                 {
                     Debug.WriteLine("(read_chunk_stbl) error reading sub_chunk_len - possibly number too large: {0}", e);
-                    sub_chunk_len = 0;
+                    subChunkLen = 0;
                 }
-
-                if (sub_chunk_len <= 1 || sub_chunk_len > size_remaining)
+                if (subChunkLen <= 1 || subChunkLen > sizeRemaining)
                 {
-                    Debug.WriteLine("strange size for chunk inside stbl " + sub_chunk_len + " (remaining: " + size_remaining + ")");
+                    Debug.WriteLine("strange size for chunk inside stbl " + subChunkLen + " (remaining: " + sizeRemaining + ")");
                     return 0;
                 }
-
-                sub_chunk_id = qtstream.ReadUint32();
-
-                if (sub_chunk_id == MakeFourCC32(115, 116, 115, 100))   // fourcc equals stsd
+                var subChunkId = _qtStream.ReadUint32();
+                if (subChunkId == MakeFourCc32(115, 116, 115, 100))   // fourcc equals stsd
                 {
-                    if (read_chunk_stsd(sub_chunk_len) == 0)
+                    if (ReadChunkStsd() == 0)
                         return 0;
                 }
-                else if (sub_chunk_id == MakeFourCC32(115, 116, 116, 115))  // fourcc equals stts
+                else if (subChunkId == MakeFourCc32(115, 116, 116, 115))  // fourcc equals stts
                 {
-                    read_chunk_stts(sub_chunk_len);
+                    ProcReadOverChunkStts(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(115, 116, 115, 122))  // fourcc equals stsz
+                else if (subChunkId == MakeFourCc32(115, 116, 115, 122))  // fourcc equals stsz
                 {
-                    read_chunk_stsz(sub_chunk_len);
+                    SkipOverChunkStsz(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(115, 116, 115, 99))   // fourcc equals stsc
+                else if (subChunkId == MakeFourCc32(115, 116, 115, 99))   // fourcc equals stsc
                 {
-                    read_chunk_stsc(sub_chunk_len);
+                    ReadChunkStsc();
                 }
-                else if (sub_chunk_id == MakeFourCC32(115, 116, 99, 111))   // fourcc equals stco
+                else if (subChunkId == MakeFourCc32(115, 116, 99, 111))   // fourcc equals stco
                 {
-                    read_chunk_stco(sub_chunk_len);
+                    ReadChunkStco();
                 }
                 else
                 {
-                    Debug.WriteLine("(stbl) unknown chunk id: " + SplitFourCC(sub_chunk_id));
+                    Debug.WriteLine("(stbl) unknown chunk id: " + SplitFourCc(subChunkId));
                     return 0;
                 }
-
-                size_remaining -= sub_chunk_len;
+                sizeRemaining -= subChunkLen;
             }
-
             return 1;
         }
-
-        /*
-         * chunk to offset box
-         */
-        private void read_chunk_stco(int sub_chunk_len)
+        
+        /* chunk to offset box */
+        private void ReadChunkStco()
         {
             //skip header and size
-            qtstream.Skip(4);
-
-            int num_entries = qtstream.ReadUint32();
-
-            res.stco = new int[num_entries];
-            for (int i = 0; i < num_entries; i++)
+            _qtStream.Skip(4);
+            int numEntries = _qtStream.ReadUint32();
+            _demuxRes.Stco = new int[numEntries];
+            for (int i = 0; i < numEntries; i++)
             {
-                res.stco[i] = qtstream.ReadUint32();
+                _demuxRes.Stco[i] = _qtStream.ReadUint32();
             }
         }
 
-        /*
-         * sample to chunk box
-         */
-        private void read_chunk_stsc(int sub_chunk_len)
+        /* sample to chunk box */
+        private void ReadChunkStsc()
         {
             //skip header and size
             //skip version and other junk
-            qtstream.Skip(4);
-            int num_entries = qtstream.ReadUint32();
-            res.stsc = new ChunkInfo[num_entries];
-            for (int i = 0; i < num_entries; i++)
+            _qtStream.Skip(4);
+            int numEntries = _qtStream.ReadUint32();
+            _demuxRes.Stsc = new ChunkInfo[numEntries];
+            for (int i = 0; i < numEntries; i++)
             {
-                ChunkInfo entry = new ChunkInfo();
-                entry.first_chunk = qtstream.ReadUint32();
-                entry.samples_per_chunk = qtstream.ReadUint32();
-                entry.sample_desc_index = qtstream.ReadUint32();
-                res.stsc[i] = entry;
+                _demuxRes.Stsc[i] = new ChunkInfo(_qtStream.ReadUint32(), _qtStream.ReadUint32(), _qtStream.ReadUint32());
             }
         }
 
-        int read_chunk_minf(int chunk_len)
+        private int ReadChunkMediaInfo(int chunkLen)
         {
-            int dinf_size;
-            int stbl_size;
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-            int media_info_size;
-
+            int dinfSize;
+            int stblSize;
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            int mediaInfoSize;
             /**** SOUND HEADER CHUNK ****/
-
             try
             {
-                media_info_size = (qtstream.ReadUint32());
+                mediaInfoSize = (_qtStream.ReadUint32());
             }
             catch (Exception e)
             {
                 Debug.WriteLine("(read_chunk_minf) error reading media_info_size - possibly number too large: {0}", e);
-                media_info_size = 0;
+                mediaInfoSize = 0;
             }
-
-            if (media_info_size != 16)
+            if (mediaInfoSize != 16)
             {
                 Debug.WriteLine("unexpected size in media info\n");
                 return 0;
             }
-            if (qtstream.ReadUint32() != MakeFourCC32(115, 109, 104, 100))   // "smhd" ascii values
+            if (_qtStream.ReadUint32() != MakeFourCc32(115, 109, 104, 100))   // "smhd" ascii values
             {
                 Debug.WriteLine("not a sound header! can't handle this.");
                 return 0;
             }
             /* now skip the rest */
-            qtstream.Skip(16 - 8);
-            size_remaining -= 16;
+            _qtStream.Skip(16 - 8);
+            sizeRemaining -= 16;
             /****/
-
             /**** DINF CHUNK ****/
-
             try
             {
-                dinf_size = (qtstream.ReadUint32());
+                dinfSize = _qtStream.ReadUint32();
             }
             catch (Exception e)
             {
                 Debug.WriteLine("(read_chunk_minf) error reading dinf_size - possibly number too large: {0}", e);
-                dinf_size = 0;
+                dinfSize = 0;
             }
-
-            if (qtstream.ReadUint32() != MakeFourCC32(100, 105, 110, 102))   // "dinf" ascii values
+            if (_qtStream.ReadUint32() != MakeFourCc32(100, 105, 110, 102))   // "dinf" ascii values
             {
                 Debug.WriteLine("expected dinf, didn't get it.");
                 return 0;
             }
             /* skip it */
-            qtstream.Skip(dinf_size - 8);
-            size_remaining -= dinf_size;
+            _qtStream.Skip(dinfSize - 8);
+            sizeRemaining -= dinfSize;
             /****/
-
-
             /**** SAMPLE TABLE ****/
             try
             {
-                stbl_size = (qtstream.ReadUint32());
+                stblSize = _qtStream.ReadUint32();
             }
             catch (Exception e)
             {
                 Debug.WriteLine("(read_chunk_minf) error reading stbl_size - possibly number too large: {0}", e);
-                stbl_size = 0;
+                stblSize = 0;
             }
-
-            if (qtstream.ReadUint32() != MakeFourCC32(115, 116, 98, 108))    // "stbl" ascii values
+            if (_qtStream.ReadUint32() != MakeFourCc32(115, 116, 98, 108))    // "stbl" ascii values
             {
                 Debug.WriteLine("expected stbl, didn't get it.");
                 return 0;
             }
-            if (read_chunk_stbl(stbl_size) == 0)
+            if (ReadChunkStbl(stblSize) == 0)
                 return 0;
-            size_remaining -= stbl_size;
-
-            if (size_remaining != 0)
+            sizeRemaining -= stblSize;
+            if (sizeRemaining != 0)
             {
                 Debug.WriteLine("(read_chunk_minf) - size remaining?");
-                qtstream.Skip(size_remaining);
+                _qtStream.Skip(sizeRemaining);
             }
-
             return 1;
         }
 
-        int read_chunk_mdia(int chunk_len)
+        private int ReadChunkMedia(int chunkLen)
         {
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            while (size_remaining != 0)
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            while (sizeRemaining != 0)
             {
-                int sub_chunk_len;
-                int sub_chunk_id = 0;
-
+                int subChunkLen;
                 try
                 {
-                    sub_chunk_len = (qtstream.ReadUint32());
+                    subChunkLen = (_qtStream.ReadUint32());
                 }
                 catch (Exception e)
                 {
                     Debug.WriteLine("(read_chunk_mdia) error reading sub_chunk_len - possibly number too large: {0}", e);
-                    sub_chunk_len = 0;
+                    subChunkLen = 0;
                 }
-
-                if (sub_chunk_len <= 1 || sub_chunk_len > size_remaining)
+                if (subChunkLen <= 1 || subChunkLen > sizeRemaining)
                 {
                     Debug.WriteLine("strange size for chunk inside mdia\n");
                     return 0;
                 }
-
-                sub_chunk_id = qtstream.ReadUint32();
-
-                if (sub_chunk_id == MakeFourCC32(109, 100, 104, 100))   // fourcc equals mdhd
+                var subChunkId = _qtStream.ReadUint32();
+                if (subChunkId == MakeFourCc32(109, 100, 104, 100))   // fourcc equals mdhd
                 {
-                    read_chunk_mdhd(sub_chunk_len);
+                    SkipOverChunkMdhd(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(104, 100, 108, 114))  // fourcc equals hdlr
+                else if (subChunkId == MakeFourCc32(104, 100, 108, 114))  // fourcc equals hdlr
                 {
-                    read_chunk_hdlr(sub_chunk_len);
+                    ProcReadChunkHdlr(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(109, 105, 110, 102))  // fourcc equals minf
+                else if (subChunkId == MakeFourCc32(109, 105, 110, 102))  // fourcc equals minf
                 {
-                    if (read_chunk_minf(sub_chunk_len) == 0)
+                    if (ReadChunkMediaInfo(subChunkLen) == 0)
                         return 0;
                 }
                 else
                 {
-                    Debug.WriteLine("(mdia) unknown chunk id: " + SplitFourCC(sub_chunk_id));
+                    Debug.WriteLine("(mdia) unknown chunk id: " + SplitFourCc(subChunkId));
                     return 0;
                 }
-
-                size_remaining -= sub_chunk_len;
+                sizeRemaining -= subChunkLen;
             }
-
             return 1;
         }
 
-        void read_chunk_hdlr(int chunk_len)
+        private void ProcReadChunkHdlr(int chunkLen)
         {
-            int comptype = 0;
-            int compsubtype = 0;
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            int strlen;
-
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
             /* version */
-            qtstream.ReadUint8();
-            size_remaining -= 1;
+            _qtStream.ReadUint8();
+            sizeRemaining -= 1;
             /* flags */
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            size_remaining -= 3;
-
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            sizeRemaining -= 3;
             /* component type */
-            comptype = qtstream.ReadUint32();
-            compsubtype = qtstream.ReadUint32();
-            size_remaining -= 8;
-
+            // ReSharper disable once UnusedVariable
+            var comptype = _qtStream.ReadUint32();
+            // ReSharper disable once UnusedVariable
+            var compsubtype = _qtStream.ReadUint32();
+            sizeRemaining -= 8;
             /* component manufacturer */
-            qtstream.ReadUint32();
-            size_remaining -= 4;
-
+            _qtStream.ReadUint32();
+            sizeRemaining -= 4;
             /* flags */
-            qtstream.ReadUint32();
-            qtstream.ReadUint32();
-            size_remaining -= 8;
-
+            _qtStream.ReadUint32();
+            _qtStream.ReadUint32();
+            sizeRemaining -= 8;
             /* name */
-            strlen = qtstream.ReadUint8();
-
+            // ReSharper disable once UnusedVariable
+            var strlen = _qtStream.ReadUint8();
             /* 
             ** rewrote this to handle case where we actually read more than required 
             ** so here we work out how much we need to read first
             */
-
-            size_remaining -= 1;
-
-            qtstream.Skip(size_remaining);
+            sizeRemaining -= 1;
+            _qtStream.Skip(sizeRemaining);
         }
 
-        int read_chunk_stsd(int chunk_len)
+        private int ReadChunkStsd()
         {
-            int i;
-            int numentries = 0;
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
+            int numentries;
             /* version */
-            qtstream.ReadUint8();
-            size_remaining -= 1;
+            _qtStream.ReadUint8();
             /* flags */
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            size_remaining -= 3;
-
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
             try
             {
-                numentries = (qtstream.ReadUint32());
+                numentries = (_qtStream.ReadUint32());
             }
             catch (Exception e)
             {
@@ -518,93 +428,67 @@ namespace ALACdotNET.Decoder
                 numentries = 0;
             }
 
-
-            size_remaining -= 4;
-
             if (numentries != 1)
             {
                 Debug.WriteLine("only expecting one entry in sample description atom!");
                 return 0;
             }
-
-            for (i = 0; i < numentries; i++)
+            for (int i = 0; i < numentries; i++)
             {
                 /* parse the alac atom contained within the stsd atom */
-                int entry_size;
-                int version;
-
-                int entry_remaining;
-
-                entry_size = qtstream.ReadUint32();
-                res.format = qtstream.ReadUint32();
-                entry_remaining = entry_size;
-                entry_remaining -= 8;
-
-                if (res.format != MakeFourCC32(97, 108, 97, 99))    // "alac" ascii values
+                var entrySize = _qtStream.ReadUint32();
+                _demuxRes.Format = _qtStream.ReadUint32();
+                var entryRemaining = entrySize;
+                entryRemaining -= 8;
+                if (_demuxRes.Format != MakeFourCc32(97, 108, 97, 99))    // "alac" ascii values
                 {
-                    Debug.WriteLine("(read_chunk_stsd) error reading description atom - expecting alac, got " + SplitFourCC(res.format));
+                    Debug.WriteLine("(read_chunk_stsd) error reading description atom - expecting alac, got " + SplitFourCc(_demuxRes.Format));
                     return 0;
                 }
-
                 /* sound info: */
-
-                qtstream.Skip(6); // reserved
-                entry_remaining -= 6;
-
-                version = qtstream.ReadUint16();
-
+                _qtStream.Skip(6); // reserved
+                entryRemaining -= 6;
+                var version = _qtStream.ReadUint16();
                 if (version != 1)
                     Debug.WriteLine("unknown version??");
-                entry_remaining -= 2;
-
+                entryRemaining -= 2;
                 /* revision level */
-                qtstream.ReadUint16();
+                _qtStream.ReadUint16();
                 /* vendor */
-                qtstream.ReadUint32();
-                entry_remaining -= 6;
-
+                _qtStream.ReadUint32();
+                entryRemaining -= 6;
                 /* EH?? spec doesn't say theres an extra 16 bits here.. but there is! */
-                qtstream.ReadUint16();
-                entry_remaining -= 2;
-
+                _qtStream.ReadUint16();
+                entryRemaining -= 2;
                 /* skip 4 - this is the top level num of channels and bits per sample */
-                qtstream.Skip(4);
-                entry_remaining -= 4;
-
+                _qtStream.Skip(4);
+                entryRemaining -= 4;
                 /* compression id */
-                qtstream.ReadUint16();
+                _qtStream.ReadUint16();
                 /* packet size */
-                qtstream.ReadUint16();
-                entry_remaining -= 4;
-
+                _qtStream.ReadUint16();
+                entryRemaining -= 4;
                 /* skip 4 - this is the top level sample rate */
-                qtstream.Skip(4);
-                entry_remaining -= 4;
-
+                _qtStream.Skip(4);
+                entryRemaining -= 4;
                 /* remaining is codec data */
-
                 /* 12 = audio format atom, 8 = padding */
-                res.codecdata_len = entry_remaining + 12 + 8;
-
-                if (res.codecdata_len > res.codecdata.Length)
+                _demuxRes.CodecDataLength = entryRemaining + 12 + 8;
+                if (_demuxRes.CodecDataLength > _demuxRes.CodecData.Length)
                 {
-                    Debug.WriteLine("(read_chunk_stsd) unexpected codec data length read from atom " + res.codecdata_len);
+                    Debug.WriteLine("(read_chunk_stsd) unexpected codec data length read from atom " + _demuxRes.CodecDataLength);
                     return 0;
                 }
-
-                for (int count = 0; count < res.codecdata_len; count++)
+                for (int count = 0; count < _demuxRes.CodecDataLength; count++)
                 {
-                    res.codecdata[count] = 0;
+                    _demuxRes.CodecData[count] = 0;
                 }
-
                 /* audio format atom */
-                res.codecdata[0] = 0x0c000000;
-                res.codecdata[1] = MakeFourCC(97, 109, 114, 102);       // "amrf" ascii values
-                res.codecdata[2] = MakeFourCC(99, 97, 108, 97);     // "cala" ascii values
-
-                qtstream.Read(entry_remaining, res.codecdata, 12);  // codecdata buffer should be +12
-                entry_remaining -= entry_remaining;
-
+                _demuxRes.CodecData[0] = 0x0c000000;
+                _demuxRes.CodecData[1] = MakeFourCc(97, 109, 114, 102);       // "amrf" ascii values
+                _demuxRes.CodecData[2] = MakeFourCc(99, 97, 108, 97);     // "cala" ascii values
+                _qtStream.Read(entryRemaining, _demuxRes.CodecData, 12);  // codecdata buffer should be +12
+                entryRemaining -= entryRemaining;
                 /* We need to read the bits per sample, number of channels and sample rate from the codec data i.e. the alac atom within 
                 ** the stsd atom the 'alac' atom contains a number of pieces of information which we can skip just now, its processed later 
                 ** in the alac_set_info() method. This atom contains the following information
@@ -622,303 +506,257 @@ namespace ALACdotNET.Decoder
                 ** sample rate
                 */
                 int ptrIndex = 29;  // position of bits per sample
-
-                res.sample_size = (res.codecdata[ptrIndex] & 0xff);
-
+                _demuxRes.SampleSize = (_demuxRes.CodecData[ptrIndex] & 0xff);
                 ptrIndex = 33;  // position of num of channels
-
-                res.num_channels = (res.codecdata[ptrIndex] & 0xff);
-
+                _demuxRes.NumChannels = (_demuxRes.CodecData[ptrIndex] & 0xff);
                 ptrIndex = 44;      // position of sample rate within codec data buffer
-
-                res.sample_rate = (((res.codecdata[ptrIndex] & 0xff) << 24) | ((res.codecdata[ptrIndex + 1] & 0xff) << 16) | ((res.codecdata[ptrIndex + 2] & 0xff) << 8) | (res.codecdata[ptrIndex + 3] & 0xff));
-
-                if (entry_remaining != 0)   // was comparing to null
-                    qtstream.Skip(entry_remaining);
-
-                res.format_read = 1;
-                if (res.format != MakeFourCC32(97, 108, 97, 99))        // "alac" ascii values
+                _demuxRes.SampleRate = (((_demuxRes.CodecData[ptrIndex] & 0xff) << 24) | ((_demuxRes.CodecData[ptrIndex + 1] & 0xff) << 16) | ((_demuxRes.CodecData[ptrIndex + 2] & 0xff) << 8) | (_demuxRes.CodecData[ptrIndex + 3] & 0xff));
+                if (entryRemaining != 0)   // was comparing to null
+                    _qtStream.Skip(entryRemaining);
+                _demuxRes.FormatRead = 1;
+                if (_demuxRes.Format != MakeFourCc32(97, 108, 97, 99))        // "alac" ascii values
                 {
                     return 0;
                 }
             }
-
             return 1;
         }
 
-        void read_chunk_stts(int chunk_len)
+        private void ProcReadOverChunkStts(int chunkLen)
         {
             int i;
-            int numentries = 0;
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
+            int numentries;
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
             /* version */
-            qtstream.ReadUint8();
-            size_remaining -= 1;
+            _qtStream.ReadUint8();
+            sizeRemaining -= 1;
             /* flags */
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            size_remaining -= 3;
-
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            sizeRemaining -= 3;
             try
             {
-                numentries = (qtstream.ReadUint32());
+                numentries = _qtStream.ReadUint32();
             }
             catch (Exception e)
             {
                 Debug.WriteLine("(read_chunk_stts) error reading numentries - possibly number too large: {0}", e);
                 numentries = 0;
             }
-
-            size_remaining -= 4;
-
-            res.num_time_to_samples = numentries;
-
+            sizeRemaining -= 4;
+            _demuxRes.NumTimeToSamples = numentries;
             for (i = 0; i < numentries; i++)
             {
-                res.time_to_sample[i].sample_count = (qtstream.ReadUint32());
-                res.time_to_sample[i].sample_duration = (qtstream.ReadUint32());
-                size_remaining -= 8;
+                _demuxRes.TimeToSample[i] = new SampleInfo(sampleCount: _qtStream.ReadUint32(), sampleDuration: _qtStream.ReadUint32());
+                sizeRemaining -= 8;
             }
-
-            if (size_remaining != 0)
+            if (sizeRemaining != 0)
             {
                 Debug.WriteLine("(read_chunk_stts) size remaining?");
-                qtstream.Skip(size_remaining);
+                _qtStream.Skip(sizeRemaining);
             }
         }
 
-        void read_chunk_stsz(int chunk_len)
+        private void SkipOverChunkStsz(int chunkLen)
         {
             int i;
-            int numentries = 0;
-            int uniform_size = 0;
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
+            int numentries;
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
             /* version */
-            qtstream.ReadUint8();
-            size_remaining -= 1;
+            _qtStream.ReadUint8();
+            sizeRemaining -= 1;
             /* flags */
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            qtstream.ReadUint8();
-            size_remaining -= 3;
-
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            _qtStream.ReadUint8();
+            sizeRemaining -= 3;
             /* default sample size */
-            uniform_size = (qtstream.ReadUint32());
-            if (uniform_size != 0)
+            var uniformSize = _qtStream.ReadUint32();
+            if (uniformSize != 0)
             {
                 /*
                 ** Normally files have intiable sample sizes, this handles the case where
                 ** they are all the same size
                 */
-
-                int uniform_num = 0;
-
-                uniform_num = (qtstream.ReadUint32());
-
-                res.sample_byte_size = new int[uniform_num];
-
-                for (i = 0; i < uniform_num; i++)
+                var uniformNum = (_qtStream.ReadUint32());
+                _demuxRes.SampleByteSize = new int[uniformNum];
+                for (i = 0; i < uniformNum; i++)
                 {
-                    res.sample_byte_size[i] = uniform_size;
+                    _demuxRes.SampleByteSize[i] = uniformSize;
                 }
-                size_remaining -= 4;
+                // sizeRemaining -= 4;
                 return;
             }
-            size_remaining -= 4;
-
+            sizeRemaining -= 4;
             try
             {
-                numentries = (qtstream.ReadUint32());
+                numentries = (_qtStream.ReadUint32());
             }
             catch (Exception e)
             {
                 Debug.WriteLine("(read_chunk_stsz) error reading numentries - possibly number too large: {0}", e);
                 numentries = 0;
             }
-
-            size_remaining -= 4;
-
-            res.sample_byte_size = new int[numentries];
-
+            sizeRemaining -= 4;
+            _demuxRes.SampleByteSize = new int[numentries];
             for (i = 0; i < numentries; i++)
             {
-                res.sample_byte_size[i] = (qtstream.ReadUint32());
-
-                size_remaining -= 4;
+                _demuxRes.SampleByteSize[i] = (_qtStream.ReadUint32());
+                sizeRemaining -= 4;
             }
-
-            if (size_remaining != 0)
+            if (sizeRemaining != 0)
             {
                 Debug.WriteLine("(read_chunk_stsz) size remaining?");
-                qtstream.Skip(size_remaining);
+                _qtStream.Skip(sizeRemaining);
             }
         }
 
-
-        void read_chunk_tkhd(int chunk_len)
+        private void SkipOverChunkTkhd(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
-        void read_chunk_mdhd(int chunk_len)
+        private void SkipOverChunkMdhd(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
-        void read_chunk_edts(int chunk_len)
+        private void SkipOverChunkEdts(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
         /* 'mvhd' movie header atom */
-        void read_chunk_mvhd(int chunk_len)
+        private void SkipOverChunkMvhd(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
-
+        
         /* 'udta' user data.. contains tag info */
-        void read_chunk_udta(int chunk_len)
+        private void SkipOverChunkUdta(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
         /* 'iods' */
-        void read_chunk_iods(int chunk_len)
+        private void SkipOverChunkIods(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
-        void read_chunk_elst(int chunk_len)
+        private void SkipOverChunkElst(int chunkLen)
         {
             /* don't need anything from here atm, skip */
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            qtstream.Skip(size_remaining);
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            _qtStream.Skip(sizeRemaining);
         }
 
         /* 'moov' movie atom - contains other atoms */
-        int read_chunk_moov(int chunk_len)
+        private int ReadChunkMoov(int chunkLen)
         {
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            while (size_remaining != 0)
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            while (sizeRemaining != 0)
             {
-                int sub_chunk_len;
-                int sub_chunk_id = 0;
-
+                int subChunkLen;
                 try
                 {
-                    sub_chunk_len = (qtstream.ReadUint32());
+                    subChunkLen = (_qtStream.ReadUint32());
                 }
                 catch (Exception e)
                 {
                     Debug.WriteLine("(read_chunk_moov) error reading sub_chunk_len - possibly number too large: {0}", e);
-                    sub_chunk_len = 0;
+                    subChunkLen = 0;
                 }
-
-                if (sub_chunk_len <= 1 || sub_chunk_len > size_remaining)
+                if (subChunkLen <= 1 || subChunkLen > sizeRemaining)
                 {
                     Debug.WriteLine("strange size for chunk inside moov");
                     return 0;
                 }
-
-                sub_chunk_id = qtstream.ReadUint32();
-
-                if (sub_chunk_id == MakeFourCC32(109, 118, 104, 100))   // fourcc equals mvhd
+                var subChunkId = _qtStream.ReadUint32();
+                if (subChunkId == MakeFourCc32(109, 118, 104, 100))   // fourcc equals mvhd
                 {
-                    read_chunk_mvhd(sub_chunk_len);
+                    SkipOverChunkMvhd(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(116, 114, 97, 107))   // fourcc equals trak
+                else if (subChunkId == MakeFourCc32(116, 114, 97, 107))   // fourcc equals trak
                 {
-                    if (read_chunk_trak(sub_chunk_len) == 0)
+                    if (ReadChunkTrak(subChunkLen) == 0)
                         return 0;
                 }
-                else if (sub_chunk_id == MakeFourCC32(117, 100, 116, 97))   // fourcc equals udta
+                else if (subChunkId == MakeFourCc32(117, 100, 116, 97))   // fourcc equals udta
                 {
-                    read_chunk_udta(sub_chunk_len);
+                    SkipOverChunkUdta(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(101, 108, 115, 116))  // fourcc equals elst
+                else if (subChunkId == MakeFourCc32(101, 108, 115, 116))  // fourcc equals elst
                 {
-                    read_chunk_elst(sub_chunk_len);
+                    SkipOverChunkElst(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(105, 111, 100, 115))  // fourcc equals iods
+                else if (subChunkId == MakeFourCc32(105, 111, 100, 115))  // fourcc equals iods
                 {
-                    read_chunk_iods(sub_chunk_len);
+                    SkipOverChunkIods(subChunkLen);
                 }
-                else if (sub_chunk_id == MakeFourCC32(102, 114, 101, 101))     // fourcc equals free
+                else if (subChunkId == MakeFourCc32(102, 114, 101, 101))     // fourcc equals free
                 {
-                    qtstream.Skip(sub_chunk_len - 8); // FIXME not 8
+                    _qtStream.Skip(subChunkLen - 8); // FIXME not 8
                 }
                 else
                 {
-                    Debug.WriteLine("(moov) unknown chunk id: " + SplitFourCC(sub_chunk_id));
+                    Debug.WriteLine("(moov) unknown chunk id: " + SplitFourCc(subChunkId));
                     return 0;
                 }
-
-                size_remaining -= sub_chunk_len;
+                sizeRemaining -= subChunkLen;
             }
-
             return 1;
         }
 
-        void read_chunk_mdat(int chunk_len, int skip_mdat)
+        private void ProcReadChunkMdat(int chunkLen, int skipMdat)
         {
-            int size_remaining = chunk_len - 8; // FIXME WRONG
-
-            if (size_remaining == 0)
-                return;
-
-            res.mdat_len = size_remaining;
-            if (skip_mdat != 0)
+            int sizeRemaining = chunkLen - 8; // FIXME WRONG
+            if (sizeRemaining == 0) return;
+            _demuxRes.MdatLen = sizeRemaining;
+            if (skipMdat != 0)
             {
-                saved_mdat_pos = qtstream.Position;
-
-                qtstream.Skip(size_remaining);
+                _savedMdatPos = _qtStream.Position;
+                _qtStream.Skip(sizeRemaining);
             }
         }
 
-        int set_saved_mdat()
+        private MdatPosStatus SetSavedMdat()
         {
             // returns as follows
             // 1 - all ok
             // 2 - do not have valid saved mdat pos
             // 3 - have valid saved mdat pos, but cannot seek there - need to close/reopen stream
-
-            if (saved_mdat_pos == -1)
+            if (_savedMdatPos == -1)
             {
-                Debug.WriteLine("stream contains mdat before moov but is not seekable");
-                return 2;
+                return MdatPosStatus.NoValidSaveMdatPosition;
             }
-
-            if (qtstream.Seek(saved_mdat_pos) != 0)
+            if (_qtStream.Seek(_savedMdatPos) != 0)
             {
-                return 3;
+                return MdatPosStatus.CannotSeekToMdatPosition;
             }
-
-            return 1;
+            return MdatPosStatus.Ok;
         }
 
+    }
 
+    internal enum MdatPosStatus
+    {
+        None = 0,
+        Ok = 1,
+        NoValidSaveMdatPosition = 2,
+        CannotSeekToMdatPosition = 3
     }
 }

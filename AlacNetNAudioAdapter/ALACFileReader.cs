@@ -49,7 +49,7 @@ namespace AlacNetNAudioAdapter
         private int _decompressLeftovers;
         private int _decompressBufferOffset;
         private readonly byte[] _decompressBuffer;
-        private const int DestBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
+        // private const int DestBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
         private readonly object _repositionLock = new object();
 
         /// <summary>

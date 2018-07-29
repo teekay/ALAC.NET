@@ -8,39 +8,29 @@
 **/
 namespace ALACdotNET.Decoder
 {
-    class DemuxResT
+    /// <summary>
+    /// Seems to hold various metadata about an ALAC file.
+    /// Refactoring candidate - all these read-write properties need to be readonly,
+    /// and the values to be either set via the constructor, or computed.
+    /// </summary>
+    internal class DemuxResT
     {
-        public int format_read { get; set; }
-
-        public int num_channels { get; set; }
-        public int sample_size { get; set; }
-        public int sample_rate { get; set; }
-        public int format { get; set; }
-        //public int[] buf { get; set; } = new int[1024 * 80];
-        public SampleInfo[] time_to_sample { get; set; } = new SampleInfo[16];
-        public int num_time_to_samples { get; set; }
-        public int[] sample_byte_size { get; set; } = new int[0];
-        public int codecdata_len { get; set; }
-        public int[] codecdata { get; set; } = new int[1024];
-        public int[] stco { get; set; }
-        public ChunkInfo[] stsc { get; set; }
-        public int mdat_len { get; set; }
-
         public DemuxResT()
         {
-            // not sure how many of these I need, so make 16
-            for (int i = 0; i < 16; i++)
-            {
-                time_to_sample[i] = new SampleInfo();
-            }
         }
 
-    }
-
-    class SampleInfo
-    {
-        public int sample_count { get; set; }
-        public int sample_duration { get; set; }
-    }
-
+        public int FormatRead { get; set; }
+        public int NumChannels { get; set; }
+        public int SampleSize { get; set; }
+        public int SampleRate { get; set; }
+        public int Format { get; set; }
+        public SampleInfo[] TimeToSample { get; set; } = new SampleInfo[16]; // not sure how many of these I need, so make 16
+        public int NumTimeToSamples { get; set; }
+        public int[] SampleByteSize { get; set; } = new int[0];
+        public int CodecDataLength { get; set; }
+        public int[] CodecData { get; set; } = new int[1024];
+        public int[] Stco { get; set; }
+        public ChunkInfo[] Stsc { get; set; }
+        public int MdatLen { get; set; }
+    }   
 }
