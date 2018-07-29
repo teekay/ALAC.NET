@@ -1,5 +1,5 @@
 ﻿/**
-** Copyright (c) 2015 Tomas Kohl
+** Copyright (c) 2015 - 2018 Tomas Kohl
 ** Based on Java Apple Lossless Decoder - Copyright (c) 2011 Peter McQuillan, https://github.com/soiaf/Java-Apple-Lossless-decoder
 **
 ** All Rights Reserved.
@@ -43,9 +43,10 @@ namespace ALACdotNET.Decoder
             /* if qtmovie_read returns successfully, the stream is up to
              * the movie data, which can be used directly by the decoder */
             // I don't like throwing exceptions in constructors though
-            var headerRead = qtmovie.Read();
+            int headerRead = qtmovie.Read();
             if (headerRead == 0 || headerRead == 3)
             {
+                SelfDispose(true);
                 throw new IOException("Error while loading the QuickTime movie headers.");
             }
 
@@ -54,7 +55,6 @@ namespace ALACdotNET.Decoder
             _alac.SetInfo(_demuxRes.codecdata);
         }
 
-        private bool _disposedValue; // To detect redundant calls
         private readonly DemuxResT _demuxRes;
         private readonly AlacFile _alac;
         private readonly BinaryReader _inputStream;
@@ -62,39 +62,44 @@ namespace ALACdotNET.Decoder
         private int _currentSampleBlock;
         private int _offset;
         private readonly byte[] _readBuffer = new byte[1024 * 80]; // sample big enough to hold any input for a single alac frame
-        private readonly int[] _formatBuffer= new int[1024 * 80];
+        private readonly int[] _formatBuffer = new int[1024 * 80];
         private byte[] _outputBufer = new byte[1024 * 80];
         private readonly bool _disposeStream;
-        private readonly int _destBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
+        // private readonly int _destBufferSize = 1024 * 24 * 3; // 24kb buffer = 4096 frames = 1 alac sample (we support max 24bps)
+        private bool _disposedValue; // To detect redundant calls
 
+
+        #region Properties
         /// <summary>
         /// Points to the last sample read - can be used to determine position
         /// </summary>
         public int LastSampleNumber { get; private set; }
+        #endregion
 
         /// <summary>
         /// Returns the sample rate of the specified ALAC file
         /// </summary>
         /// <returns></returns>
-        public int GetSampleRate() => _demuxRes.sample_rate != 0 ? _demuxRes.sample_rate : 0;
+        public int GetSampleRate() => _demuxRes.sample_rate != 0 ? _demuxRes.sample_rate : 44100;
 
         /// <summary>
         /// Get the number of channels for this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetNumChannels() => _demuxRes.num_channels != 0 ? _demuxRes.num_channels : 0;
+        public int GetNumChannels() => _demuxRes.num_channels != 0 ? _demuxRes.num_channels : 2;
 
         /// <summary>
         /// Returns the number of bits per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBitsPerSample() => _demuxRes.sample_size != 0 ? _demuxRes.sample_size : 0;
+        public int GetBitsPerSample() => _demuxRes.sample_size != 0 ? _demuxRes.sample_size :16;
 
         /// <summary>
         /// Returns the number of bytes per sample of this ALAC stream
         /// </summary>
         /// <returns></returns>
-        public int GetBytesPerSample() => _demuxRes.sample_size != 0 ? (int) Math.Ceiling((double)_demuxRes.sample_size / 8) : 0;
+        public int GetBytesPerSample() => _demuxRes.sample_size != 0 ? (int)Math.Ceiling((double)_demuxRes.sample_size / 8) : 2;
+
 
         /// <summary>
         /// Get total number of samples contained in the Apple Lossless file, or -1 if unknown
@@ -102,6 +107,7 @@ namespace ALACdotNET.Decoder
         /// <returns></returns>
         public int GetNumSamples()
         {
+            /* calculate output size */
             try
             {
                 return Enumerable.Range(0, _demuxRes.sample_byte_size.Length)
@@ -117,38 +123,36 @@ namespace ALACdotNET.Decoder
 
         private int SamplesFromSampleInfo(int sampleNumber)
         {
-            var sampleinfo = GetSampleInfo(sampleNumber);
-            return sampleinfo.SampleDuration >= 0 ? 1 : throw new SampleReadException("Could not read some sample");
+            var sampleinfo = TryGetSampleInfo(sampleNumber);
+            return sampleinfo?.SampleDuration ?? throw new SampleReadException("Could not read some sample");
         }
 
-        private SampleDurationInfo GetSampleInfo(int samplenum)
+        private SampleDurationInfo TryGetSampleInfo(int samplenum)
         {
             int durationIndexAccum = 0;
             int durationCurIndex = 0;
-            var emptySampleDuration = new SampleDurationInfo(0, 0);
-
             if (samplenum >= _demuxRes.sample_byte_size.Length)
             {
-                Debug.WriteLine("sample " + samplenum + " does not exist; last="+ _demuxRes.sample_byte_size.Length);
-                return emptySampleDuration;
+                Debug.WriteLine("sample " + samplenum + " does not exist; last=" + _demuxRes.sample_byte_size.Length);
+                return null;
             }
-
             if (_demuxRes.num_time_to_samples == 0)     // was null
             {
                 Debug.WriteLine("no time to samples");
-                return emptySampleDuration;
+                return null;
             }
-            while (_demuxRes.time_to_sample[durationCurIndex].sample_count + durationIndexAccum <= samplenum)
+            while ((_demuxRes.time_to_sample[durationCurIndex].sample_count + durationIndexAccum) <= samplenum)
             {
                 durationIndexAccum += _demuxRes.time_to_sample[durationCurIndex].sample_count;
                 durationCurIndex++;
                 if (durationCurIndex >= _demuxRes.num_time_to_samples)
                 {
                     Debug.WriteLine("sample " + samplenum + " does not have a duration");
-                    return emptySampleDuration;
+                    return null;
                 }
             }
-            return new SampleDurationInfo(_demuxRes.time_to_sample[durationCurIndex].sample_duration, _demuxRes.sample_byte_size[samplenum]);
+            SampleDurationInfo sampleinfo = new SampleDurationInfo(_demuxRes.sample_byte_size[samplenum], _demuxRes.time_to_sample[durationCurIndex].sample_duration);
+            return sampleinfo;
         }
 
         /// <summary>
@@ -180,29 +184,23 @@ namespace ALACdotNET.Decoder
                 // Sample past this stream's length
                 return 0;
             }
-
-            var sampleinfo = GetSampleInfo(_currentSampleBlock);
-            if (sampleinfo.SampleDuration == 0)
+            var sampleinfo = TryGetSampleInfo(_currentSampleBlock);
+            if (sampleinfo == null)
             {
                 // getting sample failed
                 Debug.WriteLine("getting sample failed");
                 return 0;
             }
-
             var sampleByteSize = sampleinfo.SampleByteSize;
             _myStream.Read(sampleByteSize, _readBuffer, 0);
-
             /* now fetch */
-            var outputBytes = _destBufferSize;
-            outputBytes = _alac.DecodeFrame(_readBuffer, pDestBuffer, outputBytes);
-
+            var outputBytes = _alac.DecodeFrame(_readBuffer, pDestBuffer);
             _currentSampleBlock = _currentSampleBlock + 1;
             LastSampleNumber += sampleinfo.SampleDuration;
             outputBytes -= _offset * GetBytesPerSample();
             Array.Copy(pDestBuffer, _offset, pDestBuffer, 0, outputBytes);
-             _offset = 0;
+            _offset = 0;
             return outputBytes;
-
         }
 
         /// <summary>
@@ -215,7 +213,6 @@ namespace ALACdotNET.Decoder
         /// <returns></returns>
         private static byte[] FormatSamples(int bps, int[] src, int samcnt)
         {
-            int temp;
             int counter = 0;
             int counter2 = 0;
             byte[] dst = new byte[65536];
@@ -234,7 +231,7 @@ namespace ALACdotNET.Decoder
                 case 2:
                     while (samcnt > 0)
                     {
-                        temp = src[counter2];
+                        var temp = src[counter2];
                         dst[counter] = (byte)temp;
                         counter++;
                         dst[counter] = (byte)((uint)temp >> 8);
@@ -270,15 +267,14 @@ namespace ALACdotNET.Decoder
             {
                 var chunkInfo = _demuxRes.stsc[i];
                 var lastChunk = i < _demuxRes.stsc.Length - 1 ? _demuxRes.stsc[i + 1].first_chunk : _demuxRes.stco.Length;
-
                 for (int chunk = chunkInfo.first_chunk; chunk <= lastChunk; chunk++)
                 {
                     int pos = _demuxRes.stco[chunk - 1];
                     int sampleCount = chunkInfo.samples_per_chunk;
                     while (sampleCount > 0)
                     {
-                        var sampleInfo = GetSampleInfo(currentSample);
-                        if (sampleInfo.SampleDuration == 0) break;
+                        var sampleInfo = TryGetSampleInfo(currentSample);
+                        if (sampleInfo == null) break;
                         currentPosition += sampleInfo.SampleDuration;
                         if (position < currentPosition)
                         {
@@ -298,9 +294,12 @@ namespace ALACdotNET.Decoder
             }
         }
 
-
-
         protected virtual void Dispose(bool disposing)
+        {
+            SelfDispose(disposing);
+        }
+
+        private void SelfDispose(bool disposing)
         {
             if (_disposedValue) return;
             if (disposing && _disposeStream)
