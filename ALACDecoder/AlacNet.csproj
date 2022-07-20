@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>ALACdotNET.Decoder</RootNamespace>
+	<AssemblyName>ALACDecoder</AssemblyName>
+  </PropertyGroup>
+  
+  <PropertyGroup>
+   <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+   <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+   <PackageId>AlacNet</PackageId>
+   <Authors>Tomáš Kohl</Authors>
+   <Product>Alac.Net</Product>
+   <Description>A decoder of the ALAC lossless audio files for .NET</Description>
+   <Copyright>Copyright © Tomáš Kohl 2016 - 2022</Copyright>
+   <PackageProjectUrl>https://github.com/teekay/ALAC.NET</PackageProjectUrl>
+   <PackageReadmeFile>README.md</PackageReadmeFile>
+   <RepositoryType>git</RepositoryType>
+   <PackageTags>audio;alac</PackageTags>
+   <AssemblyVersion>1.0.0</AssemblyVersion>
+   <PackageLicenseFile>LICENSE</PackageLicenseFile>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup> 
+</Project>

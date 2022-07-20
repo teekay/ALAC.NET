@@ -4,14 +4,30 @@
     <RootNamespace>AlacNetNAudioAdapter</RootNamespace>
     <AssemblyName>AlacNetNAudioAdapter</AssemblyName>
    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+   <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+   <Authors>Tomáš Kohl</Authors>
+   <Company>Tomáš Kohl</Company>
+   <Description>Adapter for AlacNet that makes the decoded audio available for use in applications that use NAudio</Description>
+   <Copyright>Copyright © Tomáš Kohl 2015 - 2022</Copyright>
+   <PackageProjectUrl>https://github.com/teekay/ALAC.NET</PackageProjectUrl>
+   <PackageReadmeFile>README.md</PackageReadmeFile>
+   <RepositoryType>git</RepositoryType>
+   <PackageTags>naudio;alac</PackageTags>
+   <AssemblyVersion>1.0.0</AssemblyVersion>
+   <PackageLicenseFile>LICENSE</PackageLicenseFile>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\ALACDecoder\ALACDecoder.csproj">
-      <Project>{94eff4f5-99da-4c74-9892-dbbb99188dd0}</Project>
-      <Name>ALACDecoder</Name>
-    </ProjectReference>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AlacNet" Version="1.0.0" />
     <PackageReference Include="NAudio">
       <Version>1.10.0</Version>
     </PackageReference>

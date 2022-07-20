@@ -1,13 +1,19 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.24720.0
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32630.192
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ALACDecoder", "ALACDecoder\ALACDecoder.csproj", "{94EFF4F5-99DA-4C74-9892-DBBB99188DD0}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AlacNet", "ALACDecoder\AlacNet.csproj", "{94EFF4F5-99DA-4C74-9892-DBBB99188DD0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ALACDecoderDemo", "ALACDecoderDemo\ALACDecoderDemo.csproj", "{20CF37DC-14C9-4D93-BDFF-85A06862C713}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AlacNetDemo", "ALACDecoderDemo\AlacNetDemo.csproj", "{20CF37DC-14C9-4D93-BDFF-85A06862C713}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlacNetNAudioAdapter", "AlacNetNAudioAdapter\AlacNetNAudioAdapter.csproj", "{7D4EB008-1390-44DC-828C-998033834459}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AlacNetNAudioAdapter", "AlacNetNAudioAdapter\AlacNetNAudioAdapter.csproj", "{7D4EB008-1390-44DC-828C-998033834459}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{DBCA5389-EAF7-497A-A62A-8B009AD5BA8B}"
+	ProjectSection(SolutionItems) = preProject
+		LICENSE = LICENSE
+		README.md = README.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -30,5 +36,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3C49F0A3-98EF-4568-A41C-B55A9B0CE0E5}
 	EndGlobalSection
 EndGlobal

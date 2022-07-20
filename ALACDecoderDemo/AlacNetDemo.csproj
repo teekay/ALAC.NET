@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DecodeAlacDemo</RootNamespace>
+    <AssemblyName>DecodeAlacDemo</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ALACDecoder\AlacNet.csproj">
+      <Project>{94eff4f5-99da-4c74-9892-dbbb99188dd0}</Project>
+      <Name>ALACDecoder</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\AlacNetNAudioAdapter\AlacNetNAudioAdapter.csproj">
+      <Project>{7d4eb008-1390-44dc-828c-998033834459}</Project>
+      <Name>AlacNetNAudioAdapter</Name>
+    </ProjectReference>
+  </ItemGroup>
+</Project>

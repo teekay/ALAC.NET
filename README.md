@@ -9,4 +9,9 @@ The ALACDecoder library now targets Netstandard 2.0. Previously, it was a PCL li
 
 If you don't need NAudio support, simply ignore the ALACFileReader class and do what you wish with the ALACContext class that does the actual work.
 
+There are two Nuget packages:
+
+- AlacNet (the decoder)
+- AlacNetNAudioAdapter (the NAudio adapter)
+
 Contributors welcome.
